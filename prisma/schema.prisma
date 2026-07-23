@@ -1,0 +1,455 @@
+// SkillSpark schema — source of truth for the database (ARCHITECTURE.md §4).
+// Naming per docs/REPOSITORY_STANDARDS.md: PascalCase models mapped to
+// snake_case plural tables. Every index records the query it serves.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Identity (M1) ----------
+// Emails are normalized to lowercase in code (lib/identity.ts) AND guarded by
+// a functional unique index on lower(email) added in the migration SQL —
+// Prisma can't express functional indexes, so the migration carries it.
+
+// status: "active" | "inactive"
+model Admin {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  status       String   @default("active")
+  isSuperAdmin Boolean  @default(false) @map("is_super_admin")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("admins")
+}
+
+// status: "active" | "blocked"
+model Student {
+  id              String    @id @default(cuid())
+  studentCode     String?   @unique @map("student_code")
+  name            String
+  email           String    @unique
+  status          String    @default("active")
+  accessStartDate DateTime  @map("access_start_date")
+  accessEndDate   DateTime  @map("access_end_date")
+  lastLoginAt     DateTime? @map("last_login_at")
+  lastEmailedAt   DateTime? @map("last_emailed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  studentBatches    StudentBatch[]
+  studentExams      StudentExam[]
+  quizSessions      QuizSession[]
+  attempts          Attempt[]
+  videoProgress     VideoProgress[]
+  materialDownloads MaterialDownload[]
+
+  // Roster filters (ARCHITECTURE §5 Student): status filter, recency sort,
+  // expiry filter / email-eligibility checks.
+  @@index([status])
+  @@index([createdAt])
+  @@index([accessEndDate])
+  @@map("students")
+}
+
+// actorType: "admin" | "student" | "system"
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?  @map("actor_id")
+  actorEmail String?  @map("actor_email")
+  actorType  String   @map("actor_type")
+  action     String
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Viewer filters (ARCHITECTURE §5 AuditLog): action+recency is the hot
+  // investigation pattern; entity and actor filters secondary.
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+  @@index([actorEmail])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ---------- Catalog (M2) ----------
+// ContentItem replaces the legacy Video+Note pair: one ordered, mixed-type
+// child of a module (or course when flat, or a video item for attachments).
+// CHECK constraints (hand-added in the migration) enforce exactly-one-parent
+// and type-field consistency — invariants the app must never rely on alone.
+
+// status: "active" | "inactive"; layout: "module" | "flat"
+model Course {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  imageUrl    String?  @map("image_url")
+  status      String   @default("active")
+  layout      String   @default("module")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  modules      Module[]
+  items        ContentItem[]
+  batchCourses BatchCourse[]
+
+  // Course lists filter by status; admin lists sort by recency.
+  @@index([status])
+  @@index([createdAt])
+  @@map("courses")
+}
+
+model Module {
+  id          String   @id @default(cuid())
+  courseId    String   @map("course_id")
+  title       String
+  description String?
+  moduleOrder Int      @default(0) @map("module_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  course Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  items  ContentItem[]
+
+  // Ordered module list per course (ARCHITECTURE §5 ContentItem).
+  @@index([courseId, moduleOrder])
+  @@map("modules")
+}
+
+// type: "video" | "material"
+// video fields: driveFileId (+duration); material fields: sourceType
+// ("upload" | "drive" | "url") with exactly one source column set.
+// Parent: exactly one of moduleId | courseId | parentItemId (CHECK).
+model ContentItem {
+  id           String  @id @default(cuid())
+  type         String
+  moduleId     String? @map("module_id")
+  courseId     String? @map("course_id")
+  parentItemId String? @map("parent_item_id")
+  title        String
+  description  String?
+  itemOrder    Int     @default(0) @map("item_order")
+  status       String  @default("active")
+
+  // video
+  driveFileId       String?   @map("drive_file_id")
+  duration          Int?
+  durationFetchedAt DateTime? @map("duration_fetched_at")
+
+  // material
+  sourceType       String?  @map("source_type")
+  storagePath      String?  @map("storage_path")
+  externalUrl      String?  @map("external_url")
+  mimeType         String?  @map("mime_type")
+  originalFileName String?  @map("original_file_name")
+  downloadEnabled  Boolean  @default(false) @map("download_enabled")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  module        Module?         @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  course        Course?         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  parentItem    ContentItem?    @relation("ItemAttachments", fields: [parentItemId], references: [id], onDelete: Cascade)
+  attachments   ContentItem[]   @relation("ItemAttachments")
+  videoProgress VideoProgress[]
+  downloads     MaterialDownload[]
+
+  // Ordered items per parent (module layout / flat layout / attachments).
+  @@index([moduleId, itemOrder])
+  @@index([courseId, itemOrder])
+  @@index([parentItemId, itemOrder])
+  @@index([status])
+  @@map("content_items")
+}
+
+// ---------- Video progress (M4-S1 prerequisite; watch page writes it at M4-S3) ----------
+// One row per (student, video item). "Continue learning" reads the most
+// recent incomplete row (ARCHITECTURE §5 VideoProgress). Save is an upsert
+// on the unique pair (M4-S3).
+
+model VideoProgress {
+  id              String   @id @default(cuid())
+  studentId       String   @map("student_id")
+  itemId          String   @map("item_id")
+  positionSeconds Int      @default(0) @map("position_seconds")
+  // Cumulative seconds of content actually PLAYED (forward playback only, seeks
+  // excluded) — distinct from positionSeconds (last position). Powers watch-time
+  // analytics and skip detection: completed but watchSeconds ≪ duration = skipped.
+  watchSeconds    Int      @default(0) @map("watch_seconds")
+  completed       Boolean  @default(false)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  student Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  item    ContentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, itemId])
+  @@index([studentId, updatedAt(sort: Desc)])
+  @@map("video_progress")
+}
+
+// ---------- Material downloads (M6-S3 analytics) ----------
+// Append-only log of actual material/notes downloads (a click on Download for a
+// downloadEnabled upload). One row per download; powers download-count analytics
+// (per material, per course via the item, per student, over time). Views (inline)
+// are NOT logged — only real downloads (the metric the owner asked for).
+model MaterialDownload {
+  id        String   @id @default(cuid())
+  itemId    String   @map("item_id")
+  studentId String   @map("student_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  item    ContentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  student Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  // Top-materials rollup by item; time-series + per-student scans.
+  @@index([itemId])
+  @@index([createdAt])
+  @@index([studentId])
+  @@map("material_downloads")
+}
+
+// ---------- Enrollment (M3) ----------
+// Batch is the only course-access path (reference-app core invariant): a
+// student's accessible courses = union over their batches' courses.
+
+model Batch {
+  id          String   @id @default(cuid())
+  batchCode   String   @unique @map("batch_code")
+  batchName   String   @map("batch_name")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  studentBatches StudentBatch[]
+  batchCourses   BatchCourse[]
+  batchExams     BatchExam[]
+
+  // Admin batch list sorts by recency.
+  @@index([createdAt])
+  @@map("batches")
+}
+
+model StudentBatch {
+  id         String   @id @default(cuid())
+  studentId  String   @map("student_id")
+  batchId    String   @map("batch_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batch   Batch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  // canAccessCourse EXISTS probe + batch roster (ARCHITECTURE §5).
+  @@unique([studentId, batchId])
+  @@index([batchId])
+  @@map("student_batches")
+}
+
+model BatchCourse {
+  id         String   @id @default(cuid())
+  batchId    String   @map("batch_id")
+  courseId   String   @map("course_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  batch  Batch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  // A batch may hold MANY courses; the pair is unique so the same course can't
+  // be assigned to a batch twice.
+  @@unique([batchId, courseId])
+  @@index([courseId])
+  @@map("batch_courses")
+}
+
+// ---------- Exam grants (M3-S4) ----------
+// Exam access = batch path OR individual path (FR-3.3):
+// hasExamAccess(studentId, examId) = exam active ∧ (EXISTS BatchExam via the
+// student's batches ∨ EXISTS StudentExam inside its own window). Individual
+// grants carry their own window, independent of the student's global one;
+// a hand-added CHECK keeps end ≥ start.
+
+model BatchExam {
+  id         String   @id @default(cuid())
+  batchId    String   @map("batch_id")
+  examId     String   @map("exam_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  exam  Exam  @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  // hasExamAccess batch probe enters by exam (ARCHITECTURE §5).
+  @@unique([batchId, examId])
+  @@index([examId])
+  @@map("batch_exams")
+}
+
+model StudentExam {
+  id              String    @id @default(cuid())
+  studentId       String    @map("student_id")
+  examId          String    @map("exam_id")
+  accessStartDate DateTime? @map("access_start_date")
+  accessEndDate   DateTime? @map("access_end_date")
+  assignedAt      DateTime  @default(now()) @map("assigned_at")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  // hasExamAccess individual probe (ARCHITECTURE §5).
+  @@unique([studentId, examId])
+  @@index([examId])
+  @@map("student_exams")
+}
+
+// ---------- Exam engine (M5) ----------
+// Multi-exam schema; V1 ships only JET (DECISIONS). Settings live on the exam
+// row (the reference kept a KV table); numeric bounds are hand-added DB
+// CHECKs (1–100 questions, 1–300 minutes). `levels` is per-exam config —
+// question.level validates against it in app code, not a hardcoded CHECK.
+
+model Exam {
+  id               String   @id @default(cuid())
+  slug             String   @unique
+  name             String
+  status           String   @default("active")
+  questionsPerQuiz Int      @default(20) @map("questions_per_quiz")
+  timeLimitMinutes Int      @default(30) @map("time_limit_minutes")
+  levels           Json     @default("[\"basic\", \"medium\", \"hard\"]")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  questions    Question[]
+  batchExams   BatchExam[]
+  studentExams StudentExam[]
+  quizSessions QuizSession[]
+  attempts     Attempt[]
+
+  @@map("exams")
+}
+
+// uuid PKs: M11 migration maps the legacy text ids onto fresh uuids
+// (CONVENTIONS §Data representation).
+model Question {
+  id               String   @id @default(uuid())
+  examId           String   @map("exam_id")
+  level            String
+  sourceQuestionNo String   @map("source_question_no")
+  prompt           String
+  sheetName        String   @map("sheet_name")
+  importedAt       DateTime @default(now()) @map("imported_at")
+
+  exam       Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  options    QuestionOption[]
+  answerRows AnswerRow[]
+
+  // Import upsert key + admin level-list; quiz sampling reads id lists by
+  // the (examId, level) prefix (ARCHITECTURE §5 Question).
+  @@unique([examId, level, sourceQuestionNo])
+  @@map("questions")
+}
+
+model QuestionOption {
+  questionId  String @map("question_id")
+  optionIndex Int    @map("option_index")
+  optionText  String @map("option_text")
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([questionId, optionIndex])
+  @@map("question_options")
+}
+
+// Numeric debit/credit — comparison is numeric after comma-strip (evaluator
+// rule, CONVENTIONS §Data representation).
+model AnswerRow {
+  id         String   @id @default(uuid())
+  questionId String   @map("question_id")
+  rowIndex   Int      @map("row_index")
+  account    String
+  debit      Decimal?
+  credit     Decimal?
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  // Quiz hydration fetches a question's rows in order (§5 Question).
+  @@index([questionId, rowIndex])
+  @@map("answer_rows")
+}
+
+// ---------- Quiz sessions (M5-S4) ----------
+// Ephemeral: one row per started quiz, expiry set server-side from the
+// exam's timeLimitMinutes. Submit (M5-S5) resolves against it; the unique
+// quizId on Attempt makes submission idempotent.
+
+model QuizSession {
+  id          String   @id @default(uuid())
+  studentId   String   @map("student_id")
+  examId      String   @map("exam_id")
+  level       String
+  questionIds String[] @map("question_ids")
+  createdAt   DateTime @default(now()) @map("created_at")
+  expiresAt   DateTime @map("expires_at")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  // Submit/resume lookups (reference index shape).
+  @@index([studentId, expiresAt(sort: Desc)])
+  @@map("quiz_sessions")
+}
+
+// ---------- Attempts (M5-S5) ----------
+// The durable quiz record. unique(quizId) IS the idempotency mechanism:
+// double/concurrent submits insert-first and the constraint leaves exactly
+// one attempt (§5). percentage is a 0–1 fraction (reference numeric(6,4)).
+
+model Attempt {
+  id               String   @id @default(uuid())
+  quizId           String   @unique @map("quiz_id")
+  studentId        String   @map("student_id")
+  examId           String   @map("exam_id")
+  level            String
+  score            Int
+  totalQuestions   Int      @map("total_questions")
+  percentage       Decimal  @db.Decimal(6, 4)
+  performanceLabel String   @map("performance_label")
+  completedAt      DateTime @default(now()) @map("completed_at")
+  resultsJson      Json     @map("results_json")
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  exam    Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  // Past scores, keyset paged (ARCHITECTURE §5 QuizSession/Attempt).
+  @@index([studentId, completedAt(sort: Desc)])
+  @@map("attempts")
+}
+
+// ---------- Jobs (M0) ----------
+// Outbox-pattern job queue (docs/CONVENTIONS.md §Background work).
+// status: "pending" | "running" | "done" | "dead"
+model Job {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json      @default("{}")
+  status      String    @default("pending")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5) @map("max_attempts")
+  runAt       DateTime  @default(now()) @map("run_at")
+  lastError   String?   @map("last_error")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Serves the drain query: WHERE status='pending' AND run_at <= now() ORDER BY run_at.
+  @@index([status, runAt])
+  @@map("jobs")
+}

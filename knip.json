@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["app/**/{page,layout,default,error,not-found,loading}.tsx", "app/**/route.ts"],
+  "project": ["**/*.{ts,tsx}"],
+  "ignore": ["test/server-only-stub.ts", "components/admin/async-button.tsx"],
+  "ignoreDependencies": ["lint-staged", "tailwindcss", "postcss", "@prisma/client"],
+  "tags": ["-public"],
+  "rules": {
+    "types": "warn"
+  }
+}

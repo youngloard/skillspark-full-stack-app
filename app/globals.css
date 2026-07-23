@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+/* ============================================================
+   SkillSpark design tokens — the code form of docs/DESIGN.md.
+   "Ledger precision, sparked": calm slate, one scarce teal spark.
+   Do not invent values here; change DESIGN.md first, then mirror.
+   ============================================================ */
+
+@theme {
+  /* --- Fonts (the CSS vars are set by next/font in layout.tsx) --- */
+  --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SFMono-Regular", monospace;
+
+  /* --- Radii (DESIGN.md §7) ---
+     These OVERRIDE Tailwind's default radius scale, so rounded-xl is 24px
+     here (not 12px). Only sm/md/lg/xl exist: `rounded-2xl` / `rounded-3xl`
+     fall through to Tailwind's defaults (16px / 24px), which makes 2xl
+     SMALLER than our xl — a non-monotonic scale. Use only these four. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* --- Motion (DESIGN.md §12; carried from the exam app) --- */
+  --ease-out-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-standard: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* --- Brand teal ramp (fixed across themes; DESIGN.md §5) --- */
+  --color-spark: #1abc9c; /* decorative only: glow, gradient, active dot */
+  --color-teal-400: #2dd4bf;
+  --color-teal-500: #12a594;
+  --color-teal-600: #0d9488;
+  --color-teal-700: #0f766e; /* action bg w/ white text — AA (5.9:1) */
+
+  /* --- Semantic (outside the brand harmony; always icon+label) --- */
+  --color-success: #16a34a; /* grass green, distinct from brand teal */
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-info: #2563eb;
+}
+
+/* ------------------------------------------------------------
+   Role tokens — theme-switched. The no-flash init script in
+   layout.tsx always sets data-theme, so :root is the light
+   default and [data-theme="dark"] is the re-derived dark set.
+   ------------------------------------------------------------ */
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --line: rgba(15, 23, 42, 0.08);
+  --hairline: rgba(15, 23, 42, 0.06);
+  --fg: #0f172a;
+  --fg-muted: #475569;
+  --fg-subtle: #64748b;
+  --accent: #0f766e; /* action teal, tuned for white text on light */
+  --accent-hover: #0d9488;
+  --accent-fg: #ffffff;
+  --focus: #12a594;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1220; /* deep slate, keeps a trace of brand #2C3E50 */
+  --surface: #141c2b;
+  --surface-2: #1e293b;
+  --line: rgba(148, 163, 184, 0.14);
+  --hairline: rgba(148, 163, 184, 0.1);
+  --fg: #e7ecf3;
+  --fg-muted: #94a3b8;
+  --fg-subtle: #64748b;
+  --accent: #2dd4bf; /* brand shines vivid on near-black */
+  --accent-hover: #5eead4;
+  --accent-fg: #06231f;
+  --focus: #2dd4bf;
+  color-scheme: dark;
+}
+
+/* Map roles into Tailwind utilities (inline = follows the vars,
+   so bg-surface / text-fg / border-line switch with the theme). */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-hairline: var(--hairline);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-focus: var(--focus);
+}
+
+/* ------------------------------------------------------------
+   Base
+   ------------------------------------------------------------ */
+* {
+  border-color: var(--line);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-spark) 28%, transparent);
+  color: var(--fg);
+}
+
+/* Visible, on-brand keyboard focus everywhere. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Tabular figures wherever numbers sit in a column (the ledger rule). */
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------
+   Scrollbars — thin, transparent track, a subtle on-brand thumb
+   that floats (padding via a transparent border). Theme-aware
+   through --fg-subtle, so it re-derives in dark automatically.
+   ------------------------------------------------------------ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--fg-subtle) 42%, transparent) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--fg-subtle) 38%, transparent);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--fg-subtle) 60%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Opt-out: keep an element scrollable but hide its scrollbar entirely. */
+.scrollbar-none {
+  scrollbar-width: none; /* Firefox */
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none; /* Chromium / WebKit */
+}
+
+/* Admin overlay entrances (transform/opacity only — DESIGN.md §12).
+   Reduced-motion is neutralised by the global rule below. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes confirm-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Chart grow-in: marks animate from the baseline to their value on load
+   (owner: "bars grow, not starting full"). Reduced-motion neutralises these via
+   the global rule below. transform-only, so they stay cheap. */
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes pop-in {
+  from {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+}
+.grow-x {
+  transform-origin: left center;
+  animation: grow-x 600ms var(--ease-out-standard) both;
+}
+.grow-y {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: grow-y 600ms var(--ease-out-standard) both;
+}
+.pop-in {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pop-in 500ms var(--ease-out-standard) both;
+}
+
+/* Print (the admin PDF report — forced-white surface, no app chrome). */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  @page {
+    margin: 14mm;
+  }
+}
+
+/* Honour reduced motion globally (accessibility, not preference). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
