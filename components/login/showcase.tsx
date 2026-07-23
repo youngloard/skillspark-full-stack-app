@@ -1,5 +1,3 @@
-import { Logo } from "@/components/brand/logo";
-
 // Login right panel, rev 3 — a different idea per the owner: instead of an
 // abstract field, a floating preview of what SkillSpark actually is (a course
 // card, a JET score, a streak) composed in depth on a calm teal field with a
@@ -42,11 +40,6 @@ export function LoginShowcase() {
             "radial-gradient(56% 52% at 60% 40%, rgba(45,212,191,0.22) 0%, transparent 70%)",
         }}
       />
-
-      {/* wordmark, top-left, hugging the panel edge */}
-      <div className="absolute left-10 top-9 z-10">
-        <Logo className="w-[128px] text-white/85" />
-      </div>
 
       {/* floating product cluster */}
       <div className="absolute inset-0 grid place-items-center p-10">
